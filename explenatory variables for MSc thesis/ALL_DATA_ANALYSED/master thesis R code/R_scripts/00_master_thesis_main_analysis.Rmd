@@ -1,0 +1,114 @@
+---
+title: "Leaf Decomposition Across Multiple Stressor Gradients: A Comparative Study of the Boye and Kinzig Catchments, Germany"
+author:
+  - name: "Ikenna Stephen Agube"
+    affiliation: "University of Duisburg-Essen, Environmental Toxicology"
+    matriculation: "3199575"
+    email: "agubeikenna.stephen@gmail.com"
+date: "`r format(Sys.Date(), '%d %B %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 4
+    toc_float: true
+    number_sections: true
+    highlight: tango
+    fig_caption: true
+    theme: flatly
+  pdf_document:
+    toc: true
+    toc_depth: 4
+    number_sections: true
+  word_document:
+    toc: true
+    toc_depth: 4
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo    = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width  = 8,
+  fig.height = 5,
+  dpi     = 300
+)
+```
+
+---
+
+# Title Page {-}
+
+| | |
+|---|---|
+| **Student** | Ikenna Stephen Agube |
+| **Matriculation number** | 3199575 |
+| **Programme** | M.Sc. Environmental Toxicology |
+| **University** | University of Duisburg-Essen |
+| **1st Examiner** | Dr. V.C. Schreiner — Universitätsstr. 5, 45141 Essen |
+| **2nd Examiner** | Dr. A. Lorenz — Fakultät für Biologie (Aquatische Ökologie), Universitätsstr. 5, D-45141 Essen |
+| **Thesis start** | 01 May 2026 |
+| **Submission deadline** | 01 November 2026 |
+
+---
+
+# Load Packages
+
+```{r packages}
+
+```
+
+---
+
+# Set Working Directory
+
+```{r working-directory}
+# Portable working directory — detects script location automatically
+if (requireNamespace("rstudioapi", quietly = TRUE) && rstudioapi::isAvailable()) {
+  script_dir <- dirname(rstudioapi::getActiveDocumentContext()$path)
+} else {
+  script_dir <- getSrcDirectory(function() {})
+}
+data_dir <- normalizePath(file.path(script_dir, "..", "data", "processed"),
+                          mustWork = FALSE)
+setwd(data_dir)
+message("Working directory: ", getwd())
+```
+
+---
+
+# Load Data
+
+```{r load-data}
+
+```
+
+---
+
+# Data Cleaning
+
+```{r data-cleaning}
+
+```
+
+---
+
+# Results
+
+##
+
+```{r results}
+
+```
+
+---
+
+# Discussion
+
+---
+
+# Session Info
+
+```{r session-info}
+sessionInfo()
+```

@@ -1,0 +1,3 @@
+LandUse,n_streams,n_samples,streams
+rural,7,16,"GRU1, KIN1, KIN4, KRE2, ORB2, SAL1, STE1"
+urban,9,22,"BIE1, BRA1, GRU2, KIN2, KIN3, KRE1, ORB1, SAL2, STE2"

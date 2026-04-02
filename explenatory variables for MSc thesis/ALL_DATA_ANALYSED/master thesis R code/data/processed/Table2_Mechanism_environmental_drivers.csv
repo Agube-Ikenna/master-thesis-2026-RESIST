@@ -1,0 +1,8 @@
+"Hypothesis","Catchment","Endpoint","Predictor","Estimate","SE","t","p","Sig","n_bags","n_sites"
+"H1","Both","k_micro","Agricultural land use (%)",0.000063,0.000241,0.26,"0.797","ns",75,26
+"H1","Both","k_micro","Conductivity (uS/cm)",0.000785,0.000241,3.249,"0.004","**",75,26
+"H2","Boye","k_micro","Sum metal toxic units (Cd+Cu+Fe+Ni+Pb+Zn)",0.000246,0.000457,0.538,"0.614","ns",21,7
+"H2","Kinzig","k_micro","Nitrate (NO3, mg/L)",0.000169,0.000094,1.796,"0.094","ns",54,19
+"H2","Kinzig","k_micro","Ortho-phosphate (mg/L)",0.000148,0.000093,1.595,"0.132","ns",54,19
+"H3","Boye","k_total","High fine sediment (>= 25% vs < 25%)",0.003297,0.006382,0.517,"0.627","ns",21,7
+"H4","Kinzig","k_total","CPOM streambed cover (%)",-0.000926,0.001129,-0.821,"0.424","ns",50,19

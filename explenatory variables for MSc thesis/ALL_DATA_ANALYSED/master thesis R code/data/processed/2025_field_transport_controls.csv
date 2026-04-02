@@ -1,0 +1,19 @@
+﻿bag_ID,type,catchment,initial_mass_g,mass_60_g,mass_500_g,comment
+518,fine,Boye,3.462,3.144,0.182,minor mass reduction observed
+150,fine,Boye,3.505,2.968,0.155, moderate mass loss  observed
+678,fine,Boye,3.496,3.193,0.168,
+L041,coarse,Boye,3.509,3.169,0.163,
+L171,coarse,Boye,3.527,3.242,0.174,
+L083,coarse,Boye,3.452,3.173,0.17,
+037,fine,Kinzig,3.530,1.999,0.103,loss and visible leaf damage
+632,fine,Kinzig,3.521,2.890,0.118,
+001,fine,Kinzig,3.500,2.968,0.169,
+L093,coarse,Kinzig,3.486,2.947,0.144,
+L136,coarse,Kinzig,3.488,3.222,0.159,
+L042,coarse,Kinzig,3.537,3.260,0.167,
+707,fine,Emscher,3.499,3.314,0.182,
+538,fine,Emscher,3.542,3.207,0.183,
+147,fine,Emscher,3.542,3.295,0.172,
+L060,coarse,Emscher,3.523,3.222,0.185,high residual dry mass observed
+L317,coarse,Emscher,3.451,3.188,0.166,
+L072,coarse,Emscher,3.495,3.285,0.172,

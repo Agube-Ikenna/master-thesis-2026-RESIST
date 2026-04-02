@@ -1,0 +1,4 @@
+response,contrast,estimate,SE,t.ratio,p.value
+microbial,rural - urban,2e-4,5e-4,0.4606,0.653
+total,rural - urban,1e-4,9e-4,0.0991,0.9226
+macroinvertebrate,rural - urban,-1e-4,9e-4,-0.1417,0.8896

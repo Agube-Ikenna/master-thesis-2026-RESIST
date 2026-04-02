@@ -1,0 +1,1682 @@
+---
+editor_options:
+  chunk_output_type: console
+  markdown:
+    wrap: 72
+output:
+  html_document:
+    fig_caption: yes
+    figure_caption: yes
+    highlight: tango
+    number_sections: yes
+    toc: yes
+    toc_depth: 4
+    toc_float: yes
+  pdf_document:
+    toc: yes
+    toc_depth: '4'
+  word_document:
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Standard vs. Natural: Assessing the impact of environmental variables on organic matter decomposition in streams using three substrates {.unnumbered}
+
+Verena C. Schreiner, Liana Liebmann, Alexander Feckler, Matthias Liess,
+Moritz Link, Anke Schneeweiss, Amélie Truchy, Wolf von Tümpling, Philipp
+Vormeier, Oliver Weisner, Ralf B. Schäfer, Mirco Bundschuh
+
+This study was part of the monitoring of small German streams
+([KgM](www.ufz.de/kgm))
+
+R Script written by Verena C. Schreiner\
+checked by Moritz Link
+
+RPTU Kaiserslautern-Landau\
+Fortstrasse 7\
+76829 Landau\
+GERMANY\
+Corresponding author mail address: schreiner-verena'\@'uni-landau.de, schreiner.verena'\@'rptu.de
+
+# load Tools / Packages
+
+```{r, message = FALSE, warning=FALSE}
+library(plyr)  # version 1.8.7, data manipulation
+library(dplyr) # version 1.0.9, data manipulation
+library(reshape2) # version 1.4.4, data manipulation
+library(moments) # version 0.14.1, check skewness
+library(corrplot) # version 0.92, identify correlations
+library(PerformanceAnalytics) # version 2.0.4, identify intercorrelation
+library(stabs) # version 0.6-4, for stability selection
+library(ggplot2) # version 3.3.6, prepare figures
+library(cowplot) # version 1.1.1, arrange figures
+library(ggeffects) # version 1.1.3, create marginal effects plots 
+
+
+# packages used to calculate the explanatory variables
+# library(standartox) # retrieving EC50 values, version: 0.01
+# library(OpenStars) # calculating land use in catchments, version: 1.2.3
+```
+
+set path
+```{r}
+prj <- getwd()
+setwd(prj)
+```
+
+# Response variables (decompositions)
+
+## microbial
+
+### exposure duration of microbial decomposition substrates
+```{r}
+duration <- read.table(file.path(prj, "1_in_out_2019.csv"), 
+                      header = TRUE, 
+                      sep = ";", 
+                      na.strings = c("NR", "NA")) 
+# remove leaf bag number
+duration <- duration[c("siteID", "dateOUT", "dateIN")]
+# since always three bags were deployed per sites, these duplicated information on duration are removed
+duration <- duration[!duplicated(duration$siteID),] 
+```
+
+format as dates
+```{r}
+duration$dateOUT <- as.Date(duration$dateOUT, "%d.%m.%Y")
+duration$dateIN <- as.Date(duration$dateIN, "%d.%m.%Y")
+```
+
+duration
+```{r}
+duration$duration <- difftime(duration$dateIN, duration$dateOUT, units = c("days"))
+```
+
+Read table with explanatory variables to extract mean temperature
+during exposure
+
+The raw data for environmental variables can be accessed via the PANGEA server mentioned in the manuscript.
+
+```{r}
+exp_var <- read.table(file.path(prj, "5_exp_var_2019.csv"), 
+                      header = TRUE, 
+                      sep = ",", 
+                      na.strings = c("NR", "NA")) 
+
+temp <- exp_var[,c("siteID", "temp", "temp_coarse")] 
+```
+
+### leaves (microbial)
+
+load data
+
+```{r}
+Leaves <- read.table(file.path(prj, "1_Leaf_weights_2019.csv"), 
+                      header = TRUE, 
+                      sep = ";", 
+                      na.strings = c("NR", "NA"))
+```
+
+add temperature + duration
+
+```{r}
+Leaves <- merge(Leaves, temp[,c(1,2)], by="siteID")
+Leaves <- merge(Leaves, duration[,c("siteID","duration")], by="siteID")
+```
+
+remove those without temperature data + where streams dried out
+
+```{r}
+Leaves_2 <- Leaves[!is.na(Leaves$temp), ]
+Leaves_2 <- Leaves_2[!Leaves_2$comment == "dried out", ]
+```
+
+add initial leaf weights, each leaf bag was filled with 8 $\pm$ 0.05 g
+of air dried alder leaves
+
+```{r}
+ini_weight <- read.table(file.path(prj, "1_leaf_weight_start_2019.csv"), 
+                      header = TRUE, 
+                      sep = ";", 
+                      na.strings = c("NR", "NA"))
+```
+
+add initial leaf weights to table
+
+```{r}
+leaf_weight <- merge(Leaves_2, ini_weight, by=c("leaf_bag_number"), all.x=TRUE)
+
+nrow(leaf_weight) # 188 single leaf bags
+```
+
+calculate AFDM End
+Ash-free dry mass (AFDM) is used to correct for inorganic material attached to the different substrates
+
+```{r}
+leaf_weight$rest_AFDM <- leaf_weight$rest_weight_60 - leaf_weight$rest_weight_500
+leaf_weight$OMD_AFDM <- leaf_weight$OMD_weight_60 - leaf_weight$OMD_weight_500
+```
+
+In a companion study leaf disks were cut from the leaves and used for studying several endpoints. 
+The AFDM of these leaf disks was also determined and the remaining organic matter is now corrected for these cut leaf disks
+
+```{r}
+# if AFDM information from OMD disks of the same leaf bag is available, use this to calculate ADFM 
+leaf_weight$afdm_alldisks <- ifelse(!is.na(leaf_weight$OMD_AFDM),
+                                       (leaf_weight$OMD_AFDM)/ 7
+                                    * leaf_weight$number_disks,
+                                                     NA)
+
+# in case no disk information from the respective leaf bag is available, at first use  the mean weight of one disk of the same site and then over all exposed leaf bags, independent of the stream 
+
+# calculate mean per stream
+mean_afdm_disk <- leaf_weight %>% group_by(siteID) %>%
+                  summarise(mean_afdm_disk = mean((afdm_alldisks/number_disks), na.rm = TRUE))
+
+# merge with existing data frame 
+leaf_weight <- join(leaf_weight, mean_afdm_disk, by =c("siteID")) 
+
+# now use this information where AFDM of single bags from a stream are missing
+# count samples where information is missing
+length(which(is.na(leaf_weight$afdm_alldisks))) 
+# 79 samples without information about AFDM of leaf disks now (this includes samples, where no leaf disks were cut)
+# use afdm of disks from bags of the same stresm
+leaf_weight$afdm_alldisks <- ifelse(!is.na(leaf_weight$afdm_alldisks), leaf_weight$afdm_alldisks,
+                                         leaf_weight$mean_afdm_disk * leaf_weight$number_disks)
+
+# check for how many samples afdm information for disks is still missing
+length(which(is.na(leaf_weight$afdm_alldisks))) 
+# 46 samples
+# use afdm of disks from bags irrespective of stream
+leaf_weight$afdm_alldisks <- ifelse(!is.na(leaf_weight$afdm_alldisks), leaf_weight$afdm_alldisks,
+                                         mean((leaf_weight$OMD_AFDM/7),na.rm = TRUE) * leaf_weight$number_disks)
+
+# total AFDM end
+leaf_weight$afdm_end <- leaf_weight$rest_AFDM + (leaf_weight$afdm_alldisks)/1000
+
+# only use those columns you will need for the further analysis
+leaf_weight_2 <- leaf_weight[c("siteID", "rep_number", "duration", "temp", "weight_start", "afdm_end")]
+```
+
+calculate AFDM of initial leaf weight
+
+normalise the start leaf weight for handling loss and calculate the
+theoretical initial AFDM
+
+read data
+
+```{r}
+transport <-  read.table(file.path(prj, "1_Transport_leaves_2019.csv"), 
+                      header = TRUE, 
+                      sep = ";", 
+                      na.strings = c("NR", "NA")) 
+```
+
+calculate percentage differences between start and 60°C (handling
+loss from initially weight in masses) and 500°C (ashes)
+
+```{r}
+transport$perc_60 <- transport$weight_60 / transport$weight_start
+transport$perc_500 <- transport$weight_500 / transport$weight_start
+```
+
+now calculate start AFDM based on the transport controls
+
+```{r}
+leaf_weight_2$afdm_start <- ((leaf_weight_2$weight_start) * mean(transport$perc_60)) - 
+                          ((leaf_weight_2$weight_start) * mean(transport$perc_500))
+```
+
+calculate DSM
+
+normalise for exposure duration and mean temperature during exposure using this formula
+
+$$ DSM = \left( \frac{\frac{AFDM_{t0}-AFDM_{t1}}{AFDM_{t0}} *100}{Tn} \right)$$
+where $AFDM_{t0}$ is the AFDM before deployment, $AFDM_{t1}$ the AFDM after deployment, $T$ is the mean temperature over the deployment period and $n$ refers to the number of days of deployment
+
+```{r}
+leaf_weight_2$DSM <- (((leaf_weight_2$afdm_start - leaf_weight_2$afdm_end) /
+                              leaf_weight_2$afdm_start) * 100)/
+                   (leaf_weight_2$temp * as.numeric(leaf_weight_2$duration))
+
+# remove one negative value (weighing error)
+leaf_weight_2 <- leaf_weight_2[leaf_weight_2$DSM > 0, ]
+```
+
+calculate decomposed mass over whole period (not normalised for temperature and per day)
+```{r}
+leaf_weight_2$DSM_absolute <- (((leaf_weight_2$afdm_start - leaf_weight_2$afdm_end) /
+                              leaf_weight_2$afdm_start) * 100)
+```
+
+
+only keep important columns
+```{r}
+leaf_weight_2 <- leaf_weight_2[,c("siteID", "rep_number", "DSM")]
+# data from 187 leaf bags and 64 streams
+```
+
+### cotton strips (microbial)
+
+read in data
+
+```{r}
+Cotton_2019 <- read.table(file.path(prj, "2_Cotton_strips_2019.csv"), 
+                      header = TRUE, 
+                      sep = ";", 
+                      na.strings = c("NR", "NA","")) 
+```
+
+read in transport cotton used for quality assurance
+
+```{r}
+Cotton_2019_blank <- read.table(file.path(prj, "2_Cotton_strips_2019_transport.csv"), 
+                      header = TRUE, 
+                      sep = ";", 
+                      na.strings = c("NR", "NA","")) 
+```
+
+add duration + temperature
+
+```{r}
+Cotton_2019 <- merge(Cotton_2019, temp, by="siteID")
+Cotton_2019 <- merge(Cotton_2019, duration[,c("siteID","duration")], by="siteID")
+```
+
+remove those with comments (since those are broken), without tensile strenght or without temperature information
+
+```{r}
+Cotton_2019 <- Cotton_2019[is.na(Cotton_2019$comment),]
+Cotton_2019 <- Cotton_2019[!is.na(Cotton_2019$Peak.tension),]
+Cotton_2019 <- Cotton_2019[!is.na(Cotton_2019$temp),]
+```
+
+Initially 199 data points, after cleaning 161 data points
+
+To calculate tensile strength loss, normalise tension loss for transport controls, since they were not in the streams --\> initial cotton strip tension
+normalise tension loss for exposure time and average temperature during
+exposure
+
+Tension loss is calculated like above, instead of AFMD the peak tension is used
+
+```{r}
+Tens_loss <- (((mean(Cotton_2019_blank$Peak.tension) - Cotton_2019$Peak.tension) /
+                             mean(Cotton_2019_blank$Peak.tension)) * 100)/
+                   (Cotton_2019$temp * as.numeric(Cotton_2019$duration))
+
+# calculate decomposed mass over whole period (not normalised for temperature and per day)
+Tens_loss_abs <- (((mean(Cotton_2019_blank$Peak.tension) - Cotton_2019$Peak.tension) /
+                             mean(Cotton_2019_blank$Peak.tension)) * 100)
+
+Cotton_2019 <- cbind(Cotton_2019, Tens_loss)
+```
+
+```{r}
+# remove five negative values (initial tension was lower then after exposure)
+Cotton_2019 <- Cotton_2019[Cotton_2019$Tens_loss > 0, ]
+# 156 cotton strips from 63 sites
+```
+
+### decotabs (microbial)
+
+```{r}
+Decotabs_2019 <- read.table(file.path(prj, "3_Decotabs_2019.csv"), 
+                      header = TRUE, 
+                      sep = ";", fileEncoding="UTF-8-BOM", 
+                      na.strings = c("NR", "NA","")) 
+```
+
+use only fine bags, remove those which were lost / where the stream
+dried out, save coarse data for later + save an alternative data set
+
+```{r}
+Decotabs_coarse_2019 <- Decotabs_2019[Decotabs_2019$type == "coarse",]
+Decotabs_2019 <- Decotabs_2019[Decotabs_2019$type == "fine",]
+
+Decotabs_2019 <- Decotabs_2019[is.na(Decotabs_2019$comment) | ! Decotabs_2019$comment == "lost" & ! Decotabs_2019$comment == "dried out" , ]
+```
+
+remove empty bags
+
+```{r}
+Decotabs_2019 <- Decotabs_2019[is.na(Decotabs_2019$comment) | !Decotabs_2019$comment == "empty", ]
+```
+
+10 bags removed
+
+calculate afdm
+
+```{r}
+Decotabs_2019$afdm_end <- Decotabs_2019$weight_60 - Decotabs_2019$weight_500
+```
+
+```{r}
+Decotabs_transport_2019 <- read.table(file.path(prj, "3_Decotabs_2019_transport_controls.csv"), 
+                      header = TRUE, 
+                      sep = ";", fileEncoding="UTF-8-BOM", 
+                      na.strings = c("NR", "NA","")) 
+```
+
+calculate afdm of Decotabs transport controls, use only fine bags to estimate the initial afdm; create subset file for coarse decotab bags
+
+```{r}
+Decotabs_coarse_transport_2019 <- Decotabs_transport_2019[Decotabs_transport_2019$type == "coarse", ]
+Decotabs_transport_2019 <- Decotabs_transport_2019[Decotabs_transport_2019$type == "fine", ]
+
+Decotabs_transport_2019$afdm_end <- Decotabs_transport_2019$weight_60 - Decotabs_transport_2019$weight_500
+mean_Decot_trans <- mean(Decotabs_transport_2019$afdm_end)
+```
+
+add duration + temperature
+
+```{r}
+Decotabs_2019 <- merge(Decotabs_2019, temp, by="siteID") 
+
+Decotabs_2019 <- merge(Decotabs_2019, duration[,c(1,4)], by="siteID")
+```
+
+calculate decomposition and normalise for exposure duration and average
+temperature during exposure
+
+```{r}
+Decotabs_2019$DSM <- (((mean_Decot_trans - Decotabs_2019$afdm_end) /
+                              mean_Decot_trans) * 100)/
+                   (Decotabs_2019$temp * as.numeric(Decotabs_2019$duration))
+```
+
+calculate abolute decomposed substrate mass
+```{r}
+Decotabs_2019$DSM_abs <- (((mean_Decot_trans - Decotabs_2019$afdm_end) /
+                              mean_Decot_trans) * 100)
+```
+
+remove NAs + negative values (transport control lower afdm than those
+exposed in the stream)
+
+```{r}
+Decotabs_2019 <- Decotabs_2019[! is.na(Decotabs_2019$DSM) & Decotabs_2019$DSM > 0, ]
+# 185 observations from 63 streams
+```
+
+
+### combine all decomposition substrates in one dataframe
+
+```{r}
+# read in replicate number
+Replicates_2019 <- read.table(file.path(prj, "4_Replicates_2019.csv"), 
+                      header = TRUE, 
+                      sep = ";", 
+                      na.strings = c("NR", "NA","")) 
+
+Decom_2019 <- Replicates_2019
+Decom_2019 <- merge(Decom_2019, leaf_weight_2, by=c("siteID", "rep_number"), all.x = TRUE)
+names(Decom_2019)[3] <- c("DSM_leaves")
+Decom_2019 <- merge(Decom_2019, Cotton_2019[,c(1,2,8)], by=c("siteID", "rep_number"), all.x = TRUE)
+Decom_2019 <- merge(Decom_2019, Decotabs_2019[,c(1,3,12)], by=c("siteID", "rep_number"), all.x = TRUE)
+names(Decom_2019)[5] <- c("DSM_Decotabs")
+
+# remove rows (streams / replicated) with only NAs (no values for all substrates)
+# counter intuitive to use | instead of &, but only when using | rows are removed where all three values are NA. 
+# With & all rows are removed where at least one NA occurs
+Decom_2019 <- Decom_2019[!is.na(Decom_2019$DSM_leaves) | !is.na(Decom_2019$Tens_loss) |
+                           !is.na(Decom_2019$DSM_Decotabs), ]
+# data from 63 streams
+```
+
+## total
+
+### leaves (total)
+
+read in data
+
+```{r}
+Macroinv_leaves <- read.table(file.path(prj, "1_Leaves_coarse.csv"), # change file
+                      header = TRUE, 
+                      sep = ";", 
+                      na.strings = c("NR", "NA"))
+```
+
+calculate exposure duration of total leaf decomposition
+format as dates
+
+```{r}
+Macroinv_leaves$dateOUT <- as.Date(Macroinv_leaves$dateOUT, "%d.%m.%Y")
+Macroinv_leaves$dateIN <- as.Date(Macroinv_leaves$dateIN, "%d.%m.%Y")
+```
+
+duration
+
+```{r}
+Macroinv_leaves$duration_coarse <- difftime(Macroinv_leaves$dateIN, Macroinv_leaves$dateOUT, units = c("days"))
+```
+
+add mean temperature to file
+
+```{r}
+Macroinv_leaves <- merge(Macroinv_leaves, temp[,c(1,3)])
+```
+
+remove entries without temperature data
+
+```{r}
+Macroinv_leaves <- Macroinv_leaves[!is.na(Macroinv_leaves$temp_coarse), ]
+```
+
+limit to coarse bags
+
+```{r}
+Macroinv_leaves <- Macroinv_leaves[Macroinv_leaves$type == "coarse",]
+```
+
+remove entries without reliable data (problems in leaf bag numbers,
+lost during drying etc.)
+
+```{r}
+Macroinv_leaves <- Macroinv_leaves[Macroinv_leaves$comments == "", ]
+# remove 19 entries
+```
+
+calculate AFDM End
+
+```{r}
+Macroinv_leaves$afdm_end <- Macroinv_leaves$rest_weight_60 - Macroinv_leaves$rest_weight_500
+```
+
+calculate AFDM of initial leaf weight
+
+normalise the initial leaf weight for handling loss and calculate the
+theoretical initial AFDM
+
+read data
+
+```{r}
+transport_macro <-  read.table(file.path(prj, "1_Transport_leaves_coarse_2019.csv"), 
+                      header = TRUE, 
+                      sep = ";", 
+                      na.strings = c("NR", "NA")) 
+
+# only keep coarse bags
+transport_macro <- transport_macro[!transport_macro$type == "fine", ]
+```
+
+calculate percentage differences between start and 60 degree (handling
+loss from initially weight in masses) and 500°C (ashes)
+
+```{r}
+transport_macro$perc_60 <- transport_macro$weight_60 / transport_macro$initial.weight
+transport_macro$perc_500 <- transport_macro$weight_500 / transport_macro$initial.weight
+```
+
+now calculate start AFDM based on the transport controls
+
+```{r}
+Macroinv_leaves$afdm_start <- ((Macroinv_leaves$weight_start) * mean(transport_macro$perc_60)) - 
+                              ((Macroinv_leaves$weight_start) * mean(transport_macro$perc_500))
+```
+
+calculate DSM
+
+normalise for exposure duration and mean temperature during exposure
+(per degree day)
+
+```{r}
+Macroinv_leaves$DSM <- (((Macroinv_leaves$afdm_start - Macroinv_leaves$afdm_end) /
+                              Macroinv_leaves$afdm_start) * 100)/
+                   (Macroinv_leaves$temp_coarse * as.numeric(Macroinv_leaves$duration_coarse))
+
+# check for negative values (weighing errors)
+nrow(Macroinv_leaves[Macroinv_leaves$DSM < 0, ]) # all values positive
+```
+
+calculate absolute decomposed substrate mass
+```{r}
+Macroinv_leaves$DSM_abs <- (((Macroinv_leaves$afdm_start - Macroinv_leaves$afdm_end) /
+                              Macroinv_leaves$afdm_start) * 100)
+```
+
+only keep important columns
+```{r}
+Macroinv_leaves <- Macroinv_leaves[,c("siteID", "rep_number", "DSM")]
+# data from 179 leaf bags and 66 streams
+```
+
+
+### decotabs (total)
+
+use only coarse bags, remove those which were lost / where the stream
+dried out
+
+```{r}
+Decotabs_coarse_2019 <- Decotabs_coarse_2019[is.na(Decotabs_coarse_2019$comment) | ! Decotabs_coarse_2019$comment == "lost" & 
+                                               ! Decotabs_coarse_2019$comment == "dried out" & 
+                                                 ! Decotabs_coarse_2019$comment == "sampling site not assignable" , ]
+```
+
+remove empty bags
+
+```{r}
+Decotabs_coarse_2019 <- Decotabs_coarse_2019[is.na(Decotabs_coarse_2019$comment) | !Decotabs_coarse_2019$comment == "empty", ]
+```
+
+a lot of bags removed, only 88 remaining
+
+calculate afdm
+
+```{r}
+Decotabs_coarse_2019$afdm_end <- Decotabs_coarse_2019$weight_60 - Decotabs_coarse_2019$weight_500
+```
+
+calculate afdm of Decotabs transport controls, use only coarse to estimate
+the initial afdm
+
+```{r}
+Decotabs_coarse_transport_2019$afdm_end <- Decotabs_coarse_transport_2019$weight_60 - Decotabs_coarse_transport_2019$weight_500
+mean_Decot_coarse_trans <- mean(Decotabs_coarse_transport_2019$afdm_end)
+```
+
+add duration + temperature
+
+```{r}
+Decotabs_coarse_2019 <- merge(Decotabs_coarse_2019, temp, by="siteID") 
+
+Decotabs_coarse_2019 <- merge(Decotabs_coarse_2019, duration[,c(1,4)], by="siteID")
+```
+
+calculate decomposition normalise for exposure duration and average
+temperature during exposure
+
+```{r}
+Decotabs_coarse_2019$DSM <- (((mean_Decot_coarse_trans - Decotabs_coarse_2019$afdm_end) /
+                              mean_Decot_coarse_trans) * 100)/
+                   (Decotabs_coarse_2019$temp * as.numeric(Decotabs_coarse_2019$duration))
+```
+
+do not use temp_coarse, since this is from the other time point of the
+coarse leaf bags
+
+
+remove negative values (transport control lower afdm than those exposed
+in the stream)
+
+```{r}
+Decotabs_coarse_2019 <- Decotabs_coarse_2019[! is.na(Decotabs_coarse_2019$DSM) & !Decotabs_coarse_2019$DSM < 0, ]
+# 81 observations from 34 streams
+```
+
+
+calculate absolute decomposed substrate mass 
+```{r}
+Decotabs_coarse_2019$DSM_abs <- (((mean_Decot_coarse_trans - Decotabs_coarse_2019$afdm_end) /
+                              mean_Decot_coarse_trans) * 100)
+```
+
+
+
+
+change name of replicate number column
+
+```{r}
+names(Decotabs_coarse_2019)[3] <- "rep_number"
+```
+
+
+### add total decomposition substrate to the dataframe
+
+```{r}
+Decom_2019_all <- merge(Decom_2019, Macroinv_leaves, by=c("siteID", "rep_number"), all.x = TRUE)
+names(Decom_2019_all)[6] <- c("DSM_leaves_coarse")
+Decom_2019_all <- merge(Decom_2019_all, Decotabs_coarse_2019[,c(1,3,12)], by=c("siteID", "rep_number"), all.x = TRUE)
+names(Decom_2019_all)[7] <- c("DSM_Decotabs_coarse")
+```
+
+# compare microbial decomposition of different substrates
+
+at first check for skewness
+
+```{r}
+hist(Decom_2019$DSM_leaves)  # data not skewed
+
+hist(Decom_2019$DSM_Decotabs) # right skewed, wide range of data
+
+hist(Decom_2019$Tens_loss)    # slightly left skewed
+```
+
+the decotabs data as well as those from the cotton strips are skewed, consider transformation
+
+```{r}
+# Decotabs
+skewness(Decom_2019$DSM_Decotabs, na.rm = TRUE) # positively skewed, below |2|, but since over more than one magnitude transform at least for direct comparison
+Decom_2019$DSM_Decotabs_tr <- log10(Decom_2019$DSM_Decotabs)
+hist(Decom_2019$DSM_Decotabs_tr) # after transformation skew almost gone, use transformed data in direct comparision
+skewness(Decom_2019$DSM_Decotabs_tr, na.rm = TRUE)
+# 
+# Cotton strips
+skewness(Decom_2019$Tens_loss, na.rm = TRUE) # negatively skewed, but below |1| not transformed
+```
+
+
+## leaves vs. decotabs
+
+plot non-transformed data
+
+```{r}
+plot(Decom_2019$DSM_leaves, Decom_2019$DSM_Decotabs, pch = 19, ylab = "Decotabs", xlab = "leaves")
+cor.test(Decom_2019$DSM_leaves, Decom_2019$DSM_Decotabs)$p.value
+round(as.numeric(cor.test(Decom_2019$DSM_leaves, Decom_2019$DSM_Decotabs)$estimate)^2,3) # r2 = 0.01
+```
+
+plot transformed data
+
+```{r}
+plot(Decom_2019$DSM_leaves, Decom_2019$DSM_Decotabs_tr, pch = 19, ylab = "Decotabs transformed", xlab = "leaves")
+cor.test(Decom_2019$DSM_leaves, Decom_2019$DSM_Decotabs_tr)$p.value
+round(as.numeric(cor.test(Decom_2019$DSM_leaves, Decom_2019$DSM_Decotabs_tr)$estimate)^2,3) # r2 < 0.01
+```
+
+no relationship
+
+## leaves vs cotton strips
+
+plot non-transformed
+
+```{r}
+plot(Decom_2019$DSM_leaves, Decom_2019$Tens_loss, pch = 19, ylab = "Cottonstrips", xlab = "leaves")
+cor.test(Decom_2019$DSM_leaves, Decom_2019$Tens_loss)$p.value
+round(as.numeric(cor.test(Decom_2019$DSM_leaves, Decom_2019$Tens_loss)$estimate)^2,3) # r2 = 0.026
+```
+
+very weak relationship
+
+## cotton vs decotabs
+
+plot non-transformed data
+
+```{r}
+plot(Decom_2019$DSM_Decotabs, Decom_2019$Tens_loss, pch = 19, xlab = "Decotabs", ylab = "Cottonstrips")
+cor.test(Decom_2019$DSM_Decotabs, Decom_2019$Tens_loss)$p.value 
+round(as.numeric(cor.test(Decom_2019$DSM_Decotabs, Decom_2019$Tens_loss)$estimate)^2,3) # r2 = 0.126
+```
+
+weak relationship
+
+only deco transformed
+
+```{r}
+plot(Decom_2019$DSM_Decotabs_tr, Decom_2019$Tens_loss, pch = 19, xlab = "Decotabs", ylab = "Cottonstrips")
+cor.test(Decom_2019$DSM_Decotabs_tr, Decom_2019$Tens_loss)$p.value
+round(as.numeric(cor.test(Decom_2019$DSM_Decotabs_tr, Decom_2019$Tens_loss)$estimate)^2,3) # r2 = 0.206
+```
+
+moderate relationship
+
+## create Figure 1 providing relationships
+
+```{r, warning = FALSE}
+
+# Leaves vs. Decotabs
+# decotabs transformed
+p1 <- ggplot(data = Decom_2019, aes(x = DSM_leaves, y = DSM_Decotabs))+ 
+  scale_y_log10() + 
+  geom_point(size = 2) +
+  ggtitle("") +
+  ylab("Decomposed decotabs mass [%] per dday")+
+  xlab("Decomposed leaf mass [%] per dday") +
+  labs(subtitle = "A") +
+  annotate("text", x = 0.04, y=0.012, label = paste("~italic(r)^2 <", 0.01), parse=TRUE, size = 3.5)+ 
+  annotate("text", x = 0.04, y=0.008, label = "italic(p) == 0.898", parse=TRUE,  size = 3.5)+
+  theme_classic()+
+  theme(axis.text.x = element_text(colour="black", size = 12), 
+        axis.text.y = element_text(colour="black", size = 12), 
+        plot.subtitle = element_text(colour="black", size = 14),
+        legend.position="none", strip.text.x = element_text(face = "bold"), 
+        text = element_text(size=11), plot.title = element_text(hjust = 0.5))
+
+
+# Leaves + cotton strips
+p2 <- ggplot(data = Decom_2019, aes(x = DSM_leaves, y = Tens_loss))+ 
+  geom_point(size = 2) +
+  ggtitle("") +
+  ylab("Tension loss  [%] per dday")+
+  xlab("Decomposed leaf mass [%] per dday") +
+  labs(subtitle = "B") +
+  annotate("text", x = 0.04, y=0.05, label = paste("~italic(r)^2 ==", 0.03), parse=TRUE, size = 3.5)+ 
+    annotate("text", x = 0.04, y=0.02, label = "italic(p) == 0.053", parse=TRUE, size = 3.5)+
+  theme_classic()+
+  theme(axis.text.x = element_text(colour="black", size = 12), 
+        axis.text.y = element_text(colour="black", size = 12), 
+        plot.subtitle = element_text(colour="black", size = 14),
+        legend.position="none", strip.text.x = element_text(face = "bold"), 
+        text = element_text(size=11), plot.title = element_text(hjust = 0.5))
+
+
+# Decotabs vs. cotton strips
+# decotabs transformed
+p3 <- ggplot(data = Decom_2019, aes(x = DSM_Decotabs, y = Tens_loss))+ 
+  scale_x_log10() + 
+  geom_point(size = 2) +
+  ggtitle("") +
+  ylab("Tension loss  [%] per dday")+
+  xlab("Decomposed decotabs mass [%] per dday") +
+  labs(subtitle = "C") +
+  annotate("text", x = 0.25, y=0.05, label = paste("~italic(r)^2 ==", 0.21), parse=TRUE, size = 3.5)+ 
+  annotate("text", x = 0.25, y=0.02, label = "italic(p) < 0.001", parse=TRUE, size = 3.5)+
+  theme_classic()+
+  theme(axis.text.x = element_text(colour="black", size = 12), 
+        axis.text.y = element_text(colour="black", size = 12), 
+        plot.subtitle = element_text(colour="black", size = 14),
+        legend.position="none", strip.text.x = element_text(face = "bold"), 
+        text = element_text(size=11), plot.title = element_text(hjust = 0.5))
+
+
+png(filename="Figure_1_substrate_comparison.png", width=7, height=7, units="in", res = 900) 
+# create a matrix to center the lower figure in the middle
+ggdraw() +
+  draw_plot(p1, x = 0, y = 0.5, width = 0.5, height = 0.5) +
+  draw_plot(p2, x = 0.5, y = 0.5, width = 0.5, height = 0.5) +
+  draw_plot(p3, x = 0.25, y = 0, width = 0.5, height = 0.5)
+
+dev.off()
+```
+
+create Figure S2 - Version with original (not transformed) data
+
+```{r, warning=FALSE}
+p1_n_t <- ggplot(data = Decom_2019, aes(x = DSM_leaves, y = DSM_Decotabs))+ 
+  geom_point(size = 2) +
+  ggtitle("") +
+  ylab("Decomposed decotabs mass [%] per dday")+
+  xlab("Decomposed leaf mass [%] per dday") +
+  labs(subtitle = "A") +
+  annotate("text", x = 0.04, y=0.31, label = paste("~italic(r)^2 ==", 0.01), parse=TRUE, size = 3.5)+ 
+    annotate("text", x = 0.04, y=0.29, label = "italic(p) == 0.206", parse=TRUE, size = 3.5)+
+  theme_classic()+
+  theme(axis.text.x = element_text(colour="black", size = 12), 
+        axis.text.y = element_text(colour="black", size = 12), 
+        plot.subtitle = element_text(colour="black", size = 14),
+        legend.position="none", strip.text.x = element_text(face = "bold"), 
+        text = element_text(size=11), plot.title = element_text(hjust = 0.5))
+
+
+
+# Decotabs vs. cotton strips
+# decotabs transformed
+p3_n_t <- ggplot(data = Decom_2019, aes(x = DSM_Decotabs, y = Tens_loss))+ 
+  geom_point(size = 2) +
+  ggtitle("") +
+  ylab("Tension loss  [%] per dday")+
+  xlab("Decomposed decotabs mass [%] per dday") +
+  labs(subtitle = "C") +
+  annotate("text", x = 0.25, y=0.05, label = paste("~italic(r)^2 ==", 0.13), parse=TRUE, size = 3.5)+ 
+  annotate("text", x = 0.25, y=0.02, label = "italic(p) < 0.001", parse=TRUE, size = 3.5)+
+  theme_classic()+
+  theme(axis.text.x = element_text(colour="black", size = 12), 
+        axis.text.y = element_text(colour="black", size = 12), 
+        plot.subtitle = element_text(colour="black", size = 14),
+        legend.position="none", strip.text.x = element_text(face = "bold"), 
+        text = element_text(size=11), plot.title = element_text(hjust = 0.5))
+
+
+png(filename="Figure_S2_method_comparison_non_transformed.png", width=7, height=7, units="in", res = 900) 
+# create a matrix to center the lower figure in the middle
+ggdraw() +
+  draw_plot(p1_n_t, x = 0, y = 0.5, width = 0.5, height = 0.5) +
+  draw_plot(p2, x = 0.5, y = 0.5, width = 0.5, height = 0.5) +
+  draw_plot(p3_n_t, x = 0.25, y = 0, width = 0.5, height = 0.5)
+
+dev.off()
+```
+
+## calculate interreplicate variability
+
+microbial leaves
+
+```{r}
+# absolute
+mean(with(Decom_2019, tapply(DSM_leaves, siteID, var)), na.rm = TRUE) # 0.000682934
+# relative [%]
+mean(with(Decom_2019, tapply(DSM_leaves, siteID, var))/ with(Decom_2019, tapply(DSM_leaves, siteID, mean)), na.rm = TRUE)*100 # 0.46 %
+```
+
+cotton strips
+
+```{r}
+# absolute
+mean(with(Decom_2019, tapply(Tens_loss, siteID, var)), na.rm = TRUE) # 0.001353008
+# relative [%]
+mean(with(Decom_2019, tapply(Tens_loss, siteID, var))/ with(Decom_2019, tapply(Tens_loss, siteID, mean)), na.rm = TRUE)*100 # 0.92 %
+```
+
+microbial decotabs
+
+```{r}
+# absolute
+mean(with(Decom_2019, tapply(DSM_Decotabs, siteID, var)), na.rm = TRUE) # 0.001533229
+# relative [%]
+mean(with(Decom_2019, tapply(DSM_Decotabs, siteID, var))/ with(Decom_2019, tapply(DSM_Decotabs, siteID, mean)), na.rm = TRUE)*100 # 1.51 %
+```
+
+# compare total decomposition of different substrates
+
+at first check skewness
+
+```{r}
+hist(Decom_2019_all$DSM_leaves_coarse)  # data very slightly left skewed
+
+hist(Decom_2019_all$DSM_Decotabs_coarse) # data not skewed
+# check skewness
+skewness(Decom_2019_all$DSM_leaves_coarse, na.rm = TRUE) 
+skewness(Decom_2019_all$DSM_Decotabs_coarse, na.rm = TRUE)
+```
+
+for both no transformation necessary
+
+## leaves vs. decotabs
+
+```{r}
+plot(Decom_2019_all$DSM_leaves_coarse, Decom_2019_all$DSM_Decotabs_coarse, pch = 19, ylab = "Decotabs", xlab = "leaves")
+cor.test(Decom_2019_all$DSM_leaves_coarse, Decom_2019_all$DSM_Decotabs_coarse)$p.value
+round(as.numeric(cor.test(Decom_2019_all$DSM_leaves_coarse, Decom_2019_all$DSM_Decotabs_coarse)$estimate)^2,3) # r2 = 0.038
+```
+
+comparison over 66 observations from 31 sites
+
+```{r}
+data_macro <- Decom_2019_all[!is.na(Decom_2019_all$DSM_leaves_coarse), ]
+data_macro <- data_macro[!is.na(data_macro$DSM_Decotabs_coarse), ]
+```
+
+## create Figure 2 total decomposition relationships
+```{r, warning=FALSE}
+png(filename="Figure_2_substrate_comparison_total.png", width=3.5, height=3.5, units="in", res = 1000) 
+
+# Leaves vs. Decotabs
+ggplot(data = Decom_2019_all, aes(x = DSM_leaves_coarse, y = DSM_Decotabs_coarse))+ 
+  geom_point(size = 2) +
+  ggtitle("") +
+  ylab("Decomposed decotabs mass [%] per dday")+
+  xlab("Decomposed leaf mass [%] per dday") +
+  xlim(0.13, 0.9)+
+  annotate("text", x = 0.85, y=0.25, label = paste("~italic(r)^2 ==",  0.04), parse=TRUE, size = 3.5)+ 
+  annotate("text", x = 0.85, y=0.23, label = "italic(p) == 0.12", parse=TRUE, size = 3.5)+
+  theme_classic()+
+  theme(axis.text.x = element_text(colour="black", size = 12), 
+        axis.text.y = element_text(colour="black", size = 12), 
+        plot.subtitle = element_text(colour="black", size = 14),
+        legend.position="none", strip.text.x = element_text(face = "bold"), 
+        text = element_text(size=11), plot.title = element_text(hjust = 0.5))
+
+
+dev.off()
+```
+
+
+## interrepicate variability
+
+total leaves
+
+```{r}
+# absolute
+mean(with(Decom_2019_all, tapply(DSM_leaves_coarse, siteID, var)), na.rm = TRUE) # 0.007914277
+
+# relative [%]
+mean(with(Decom_2019_all, tapply(DSM_leaves_coarse, siteID, var))/ with(Decom_2019_all, tapply(DSM_leaves_coarse, siteID, mean)), na.rm = TRUE)*100 # 1.73%
+```
+
+total decotabs
+
+```{r}
+# absolute
+mean(with(Decom_2019_all, tapply(DSM_Decotabs_coarse, siteID, var)), na.rm = TRUE) # 0.0008586815
+# relative [%]
+mean(with(Decom_2019_all, tapply(DSM_Decotabs_coarse, siteID, var))/ with(Decom_2019_all, tapply(DSM_Decotabs_coarse, siteID, mean)), na.rm = TRUE)*100 # 0.74 %
+```
+
+# Explanatory variables (agricultural stressors)
+
+in the table exp_var we collected information on different
+variables that can drive the decomposition
+
+## remove unnecessary columns
+
+at first remove those variables, which are not important for fungal
+communities / decomposition: \
+* forest_perc \
+* green_perc \
+* for_buffer \
+* grass_buffer \
+
+additionally exclude stream temperature (temp), since this is already
+included in the calculates decomposition
+
+further remove those variables with a low value range / too many zero
+values:  \  \
+* Cd \
+* Pb \
+* spec_buffer  \
+* FU_rich_buffer \
+* urban_perc \
+
+```{r}
+rm_perc <- c("forest_per", "green_perc", "for_buffer", "grass_buffer", 
+             "temp",
+             "Cd_t1", "Cd_t2", "Pb_t1", "Pb_t2", "spec_buffer", "FU_rich_buffer", "urban_perc")
+
+exp_var <- exp_var[ , -which(names(exp_var) %in% rm_perc)]
+```
+
+
+## transformation check
+
+identify skewness variables with high positive values not normally
+distributed, have to be log transformed
+
+```{r}
+data_perc <- exp_var[,-1] # remove site ID
+
+skew_perc <- NULL
+for(i in 1:ncol(data_perc)) {
+  colname <- names(data_perc)[i]
+t <- skewness(select(data_perc, all_of(colname)), na.rm = TRUE)
+skew_perc$variable[i] <- all_of(colname)
+skew_perc$value[i] <- t
+}
+
+skew_perc <- as.data.frame(skew_perc)
+
+# variables abbreviate more than 2 from zero likely need to be transformed, especially when variable is spanning over several orders of magnitude
+var_transform <- skew_perc[sqrt((skew_perc$value)^2) > "2" , ]
+var_transform$variable
+```
+
+check histograms
+```{r}
+hist(exp_var$area) 
+hist(exp_var$CPOM)
+hist(exp_var$abu_shr)
+hist(exp_var$NO3_t1) 
+hist(exp_var$PO4_t1)
+hist(exp_var$NH4_t1)
+hist(exp_var$NO2_t2)
+hist(exp_var$NO3_t2)  
+hist(exp_var$PO4_t2)
+hist(exp_var$NH4_t2)
+hist(exp_var$TP_t1)
+hist(exp_var$TNb_t1)
+hist(exp_var$NP_ratio_t1)
+hist(exp_var$As_t1)
+hist(exp_var$Zn_t1) 
+hist(exp_var$Hg_t1)
+hist(exp_var$TP_t2)
+hist(exp_var$TNb_t2)
+hist(exp_var$NP_ratio_t2)
+hist(exp_var$Zn_t2)
+hist(exp_var$Hg_t2)
+hist(exp_var$pH_t2) # do not transform
+hist(exp_var$sumTU_fu_date_t2) # don't transform sumTU, since this would be double transformed
+```
+
+for the other variables, a log transformation is required
+
+```{r}
+exp_var$area_tr <- log10(exp_var$area) 
+exp_var$CPOM_tr <- log10(exp_var$CPOM+1) # add 1 since 0 value cannot be log transformed
+exp_var$abu_shr_tr <- log10(exp_var$abu_shr)
+exp_var$NO3_t1_tr <- log10(exp_var$NO3_t1)
+exp_var$PO4_t1_tr <- log10(exp_var$PO4_t1)
+exp_var$NH4_t1_tr <- log10(exp_var$NH4_t1)
+exp_var$NO2_t2_tr <- log10(exp_var$NO2_t2)
+exp_var$NO3_t2_tr <- log10(exp_var$NO3_t2)
+exp_var$PO4_t2_tr <- log10(exp_var$PO4_t2)
+exp_var$NH4_t2_tr <- log10(exp_var$NH4_t2)
+exp_var$TP_t1_tr <- log10(exp_var$TP_t1)
+exp_var$TNb_t1_tr <- log10(exp_var$TNb_t1)
+exp_var$NP_ratio_t1_tr <- log10(exp_var$NP_ratio_t1)
+exp_var$As_t1_tr <- log10(exp_var$As_t1)
+exp_var$Zn_t1_tr <- log10(exp_var$Zn_t1)
+exp_var$Hg_t1_tr <- log10(exp_var$Hg_t1)
+exp_var$TP_t2_tr <- log10(exp_var$TP_t2)
+exp_var$TNb_t2_tr <- log10(exp_var$TNb_t2)
+exp_var$NP_ratio_t2_tr <- log10(exp_var$NP_ratio_t2)
+exp_var$Zn_t2_tr <- log10(exp_var$Zn_t2)
+exp_var$Hg_t2_tr <- log10(exp_var$Hg_t2)
+```
+
+remove non-transformed variables from dataframe of explanatory variables
+
+```{r}
+rem_perc <- c("area", "CPOM", "abu_shr", "NO3_t1", "PO4_t1", "NH4_t1", "NO2_t2", "NO3_t2", "PO4_t2", "NH4_t2", "TP_t1", "TNb_t1", "NP_ratio_t1", "As_t1", "Zn_t1", "Hg_t1", "TP_t2", "TNb_t2", "NP_ratio_t2", "Zn_t2", "Hg_t2")
+
+exp_var2 <- exp_var[ , -which(names(exp_var) %in% rem_perc)]
+```
+
+check if skewness improved
+
+```{r}
+data_perc <- exp_var2[,-1] # remove site ID
+
+skew_perc <- NULL
+for(i in 1:ncol(data_perc)) {
+  colname <- names(data_perc)[i]
+t <- skewness(select(data_perc, all_of(colname)), na.rm = TRUE)
+skew_perc$variable[i] <- all_of(colname)
+skew_perc$value[i] <- t
+}
+
+skew_perc <- as.data.frame(skew_perc)
+
+# variables above values of 2 need to be transformed
+var_transform <- skew_perc[sqrt((skew_perc$value)^2) > "2" , ]
+var_transform$variable
+```
+
+Yes, no other variables need to be transformed
+
+## collinearity check
+
+correlation matrix
+make each a check per time point, as the same variable of both time points logically shows an intercorrelation 
+
+```{r}
+var_t1 <- c("streamType", "ratio_agri","area_tr", "agri_buffer", "fine_sub", "speartaxa", "perc_shred", "abu_shr_tr", "CPOM_tr", "EC_t1", "O2_t1", "NO2_t1", "NO3_t1_tr", "PO4_t1_tr", "NH4_t1_tr", "TP_t1_tr", "TNb_t1_tr", "NP_ratio_t1_tr", "As_t1_tr", "Zn_t1_tr", "Hg_t1_tr", "Cu_t1", "pH_t1", "flow_t1", "sumTU_fu_date_t1", "sumTU_iv_date_t1")
+
+exp_var_t1 <- exp_var2[ , which(names(exp_var2) %in% var_t1)]
+```
+
+
+```{r}
+var_t2 <- c("streamType", "ratio_agri","area_tr", "agri_buffer", "fine_sub", "speartaxa", "perc_shred", "abu_shr_tr", "CPOM_tr", "EC_t2", "O2_t2", "NO2_t2_tr", "NO3_t2_tr", "PO4_t2_tr", "NH4_t2_tr", "TP_t2_tr", "TNb_t2_tr", "NP_ratio_t2_tr", "As_t2", "Zn_t2_tr", "Hg_t2_tr", "Cu_t2", "pH_t2", "flow_t2", "sumTU_fu_date_t2", "sumTU_iv_date_t2")
+
+exp_var_t2 <- exp_var2[ , which(names(exp_var2) %in% var_t2)]
+```
+
+
+
+```{r, warning = FALSE}
+# this one can handle NA values in the single variables
+chart.Correlation(exp_var_t1, histogram=TRUE, pch=19)
+chart.Correlation(exp_var_t2, histogram=TRUE, pch=19)
+```
+
+Threshold for collinearity is r = 0.7 \
+* agriculture in buffer and whole
+catchment are strongly correlated (r = 0.82), remove agriculture in
+buffer since whole catchment influences stream site \
+* NO3 and TN are strongly correlated (t1 r = 0.85, t2 r = 0.79), remove NO3 since TN is a sum variable  \
+* percentage and abundance of shredder are strongly correlated, remove
+abundance
+
+```{r}
+var_t1 <- c("siteID", "streamType", "ratio_agri","area_tr", "fine_sub", "speartaxa", "perc_shred", "CPOM_tr", "EC_t1", "O2_t1", "NO2_t1", "PO4_t1_tr", "NH4_t1_tr", "TP_t1_tr", "TNb_t1_tr", "NP_ratio_t1_tr", "As_t1_tr", "Zn_t1_tr", "Hg_t1_tr", "Cu_t1", "pH_t1", "flow_t1", "sumTU_fu_date_t1", "sumTU_iv_date_t1")
+
+exp_var_t1 <- exp_var2[ , which(names(exp_var2) %in% var_t1)]
+
+
+var_t2 <- c("siteID", "streamType", "ratio_agri","area_tr", "fine_sub", "speartaxa", "perc_shred", "CPOM_tr", "EC_t2", "O2_t2", "NO2_t2_tr", "PO4_t2_tr", "NH4_t2_tr", "TP_t2_tr", "TNb_t2_tr", "NP_ratio_t2_tr", "As_t2", "Zn_t2_tr", "Hg_t2_tr", "Cu_t2", "pH_t2", "flow_t2", "sumTU_fu_date_t2", "sumTU_iv_date_t2")
+
+exp_var_t2 <- exp_var2[ , which(names(exp_var2) %in% var_t2)]
+```
+
+VIF - variance inflation factor
+
+```{r}
+Decom_2019_t1 <- merge(Decom_2019_all, exp_var_t1, by=c("siteID"))
+  
+model_t1 <- lm(DSM_leaves ~ streamType + ratio_agri + fine_sub + area_tr + fine_sub + speartaxa + perc_shred + CPOM_tr + EC_t1 + O2_t1 + NO2_t1 + PO4_t1_tr + NH4_t1_tr + TP_t1_tr + TNb_t1_tr + NP_ratio_t1_tr + As_t1_tr + Zn_t1_tr + Hg_t1_tr + Cu_t1 + pH_t1 + flow_t1 + sumTU_fu_date_t1 + sumTU_iv_date_t1, data = Decom_2019_t1)
+car::vif(model_t1)
+```
+
+VIF of NP_ratio_t1_tr is higher than 10, remove this variable
+
+```{r}
+model_t1_2 <- lm(DSM_leaves ~ streamType + ratio_agri + fine_sub + area_tr + fine_sub + speartaxa + perc_shred + CPOM_tr + EC_t1 + O2_t1 + NO2_t1 + PO4_t1_tr + NH4_t1_tr + TP_t1_tr + TNb_t1_tr + As_t1_tr + Zn_t1_tr + Hg_t1_tr + Cu_t1 + pH_t1 + flow_t1 + sumTU_fu_date_t1 + sumTU_iv_date_t1, data = Decom_2019_t1)
+car::vif(model_t1_2)
+```
+
+now VIF is fine (all clearly below 10, even below 5)
+
+
+
+```{r}
+Decom_2019_t2 <- merge(Decom_2019_all, exp_var_t2, by=c("siteID"))
+  
+model_t2 <- lm(DSM_leaves ~ streamType + ratio_agri + fine_sub + area_tr + fine_sub + speartaxa + perc_shred + CPOM_tr + EC_t2 + O2_t2 + NO2_t2_tr + PO4_t2_tr + NH4_t2_tr + TP_t2_tr + TNb_t2_tr + NP_ratio_t2_tr + As_t2 + Zn_t2_tr + Hg_t2_tr + Cu_t2 + pH_t2 + flow_t2 + sumTU_fu_date_t2 + sumTU_iv_date_t2, data = Decom_2019_t2)
+car::vif(model_t2)
+```
+
+VIF of TP, TN and the NP_ratio is higher than 10, remove NP_ratio
+
+```{r}
+model_t2_2 <- lm(DSM_leaves ~ streamType + ratio_agri + fine_sub + area_tr + fine_sub + speartaxa + perc_shred + CPOM_tr + EC_t2 + O2_t2 + NO2_t2_tr + PO4_t2_tr + NH4_t2_tr + TP_t2_tr + TNb_t2_tr + As_t2 + Zn_t2_tr + Hg_t2_tr + Cu_t2 + pH_t2 + flow_t2 + sumTU_fu_date_t2 + sumTU_iv_date_t2, data = Decom_2019_t2)
+car::vif(model_t2_2)
+```
+now VIF is fine (all clearly below 10, even below 5)
+
+# identify environmental variables driving the decomposition measured via different substrates
+
+we are using the stability selection approach, since this approach reduces the number of false selected variables
+
+## microbial leaf decomposition
+
+create subset of samples without NAs in the response variable microbial leaf
+decomposition
+
+```{r}
+Decom_2019_leaves <- Decom_2019_t1[!is.na(Decom_2019_t1$DSM_leaves), ]
+# for leaves 182 data points
+```
+
+select explanatory variables
+
+```{r}
+# all used explanatory variables
+var_en_t1 <- c("streamType", "ratio_agri","area_tr", "fine_sub", "NO2_t1", "PO4_t1_tr", "NH4_t1_tr", "TP_t1_tr", "TNb_t1_tr", "As_t1_tr", "Zn_t1_tr", "Hg_t1_tr", "Cu_t1", "pH_t1", "flow_t1", "sumTU_fu_date_t1", "O2_t1", "EC_t1")
+
+data_en_leaves <- Decom_2019_leaves[ , which(names(Decom_2019_leaves) %in% var_en_t1)]
+```
+
+separate explanatory and response variables
+```{r, trace= FALSE, echo=FALSE, message=FALSE}
+#  explanatory variables need to be standardized
+res_leaves <- as.matrix(select(Decom_2019_leaves, DSM_leaves))  # --> response variable
+data_en_leaves <- scale(as.matrix(data_en_leaves)) # --> explanatory variables
+```
+
+remove the variables EC and O2, due to missing values (NA).
+See in previous version, results where these variables were included (before change of package), results are similar
+```{r}
+data_en_leaves <- data_en_leaves[, -c(4,5)]
+```
+
+conduct a stability selection --> calculate probability that a variable is selected
+we use 0.7 (70%) as cutoff point
+```{r}
+set.seed(123) # set seed to enable better reproducibility (still not 100% reproducibility)
+(stab.lasso <- stabsel(x = data_en_leaves, y = res_leaves,
+                             fitfun = glmnet.lasso, cutoff = 0.7,
+                             PFER = 1))
+```
+variables selected: As_t1_tr, flow_t1, ratio_agri
+
+## cotton strips
+
+create subset of samples without NAs in the response variable leaf
+decomposition
+
+```{r}
+Decom_2019_cotton <- Decom_2019_t1[!is.na(Decom_2019_t1$Tens_loss), ]
+# 152 observations
+```
+
+select explanatory variables
+
+```{r}
+# all used explanatory variables
+data_en_cotton <- Decom_2019_cotton[ , which(names(Decom_2019_cotton) %in% var_en_t1)]
+```
+
+
+separate explanatory and response variables
+```{r, trace= FALSE, echo=FALSE, message=FALSE}
+#  explanatory variables need to be Decom_2019_cotton
+res_cotton <- as.matrix(select(Decom_2019_cotton, Tens_loss))  # --> response variable -> y
+data_en_cotton <- scale(as.matrix(data_en_cotton)) # --> explanatory variables -> x
+```
+
+remove the variables EC and O2, due to missing values (NA).
+See in previous version, results where these variables were included (before change of package), results are similar
+```{r}
+data_en_cotton <- data_en_cotton[, -c(4,5)]
+```
+
+conduct a stability selection --> calculate probability that a variable is selected
+we use 0.7 (70%) as cutoff point
+```{r}
+set.seed(123) # set seed to enable better reproducibility (still not 100% reproducibility)
+(stab.lasso_cotton <- stabsel(x = data_en_cotton, y = res_cotton,
+                             fitfun = glmnet.lasso, cutoff = 0.7,
+                             PFER = 1))
+```
+variables selected: ratio_agri
+
+
+## microbial decotabs
+
+create subset of samples without NAs in the response variable leaf
+decomposition
+
+```{r}
+Decom_2019_dec <- Decom_2019_t1[!is.na(Decom_2019_t1$DSM_Decotabs), ]
+# 173 observations
+```
+
+select explanatory variables
+```{r}
+# all used explanatory variables
+data_en_dec <- Decom_2019_dec[ , which(names(Decom_2019_dec) %in% var_en_t1)]
+```
+
+
+separate explanatory and response variables
+```{r}
+#  explanatory variables need to be Decom_2019_cotton
+res_dec <- as.matrix(select(Decom_2019_dec, DSM_Decotabs))  # --> response variable -> y
+data_en_dec <- scale(as.matrix(data_en_dec)) # --> explanatory variables -> x
+```
+
+remove the variables EC and O2, due to missing values (NA).
+See in previous version, results where these variables were included (before change of package), results are similar
+```{r}
+data_en_dec <- data_en_dec[, -c(4,5)]
+```
+
+conduct a stability selection --> calculate probability that a variable is selected
+we use 0.7 (70%) as cutoff point
+```{r}
+set.seed(123) # set seed to enable better reproducibility (still not 100% reproducibility)
+(stab.lasso_dec <- stabsel(x = data_en_dec, y = res_dec,
+                             fitfun = glmnet.lasso, cutoff = 0.7,
+                             PFER = 1))
+```
+variables selected: sumTU_fu_date_t1 
+
+## total leaf decomposition
+
+create subset of samples without NAs in the response variable leaf
+decomposition
+
+```{r}
+Decom_2019_leaves_coarse <- Decom_2019_t2[!is.na(Decom_2019_t2$DSM_leaves_coarse), ]
+# for leaves_coarse 169 data points
+```
+
+select explanatory variables
+
+```{r}
+# all used explanatory variables
+var_en_t2 <- c("streamType", "ratio_agri","area_tr", "fine_sub", "NO2_t2_tr", "PO4_t2_tr", "NH4_t2_tr", "TP_t2_tr", "TNb_t2_tr", "As_t2", "Zn_t2_tr", "Hg_t2_tr", "Cu_t2", "pH_t2", "flow_t2", "sumTU_fu_date_t2", "sumTU_iv_date_t2", "CPOM_tr", "perc_shred", "speartaxa", "O2_t2", "EC_t2")
+
+data_en_leaves_coarse <- Decom_2019_leaves_coarse[ , which(names(Decom_2019_leaves_coarse) %in% var_en_t2)]
+```
+
+separate explanatory and response variables
+```{r, trace= FALSE, echo=FALSE, message=FALSE}
+#  explanatory variables need to be Decom_2019_cotton
+res_leaves_coarse <- as.matrix(select(Decom_2019_leaves_coarse, DSM_leaves_coarse))  # --> response variable -> y
+data_en_leaves_coarse <- scale(as.matrix(data_en_leaves_coarse)) # --> explanatory variables -> x
+```
+
+remove the variables EC and O2, due to missing values (NA).
+Remove three entries of missing nutrient values 
+See in previous version, results where these variables were included (before change of package), results are similar
+```{r}
+data_en_leaves_coarse <- data_en_leaves_coarse[, -c(6,7)]
+data_en_leaves_coarse <- data_en_leaves_coarse[-c(32,33,34), ]
+```
+
+conduct a stability selection --> calculate probability that a variable is selected
+we use 0.7 (70%) as cutoff point
+```{r}
+set.seed(123) # set seed to enable better reproducibility (still not 100% reproducibility)
+(stab.lasso_leaves_coarse <- stabsel(x = data_en_leaves_coarse, y = res_leaves_coarse[-c(32,33,34)],
+                             fitfun = glmnet.lasso, cutoff = 0.7,
+                             PFER = 1))
+```
+variables selected: speartaxa  
+
+## total decotabs
+
+create subset of samples without NAs in the response variable leaf
+decomposition
+
+```{r}
+Decom_2019_dec_coarse <- Decom_2019_t1[!is.na(Decom_2019_t1$DSM_Decotabs_coarse), ]
+# 80 observations
+```
+
+select explanatory variables
+
+```{r}
+# all used explanatory variables
+var_en_t1_macro <- c("streamType", "ratio_agri","area_tr", "fine_sub", "NO2_t1", "PO4_t1_tr", "NH4_t1_tr", "TP_t1_tr", "TNb_t1_tr", "As_t1_tr", "Zn_t1_tr", "Hg_t1_tr", "Cu_t1", "pH_t1", "flow_t1", "sumTU_fu_date_t1", "sumTU_iv_date_t1", "CPOM_tr", "perc_shred", "speartaxa", "O2_t1", "EC_t1")
+
+data_en_dec_coarse <- Decom_2019_dec_coarse[ , which(names(Decom_2019_dec_coarse) %in% var_en_t1_macro)]
+```
+
+separate explanatory and response variables
+```{r, trace= FALSE, echo=FALSE, message=FALSE}
+#  explanatory variables need to be Decom_2019_cotton
+res_dec_coarse <- as.matrix(select(Decom_2019_dec_coarse, DSM_Decotabs_coarse))  # --> response variable -> y
+data_en_dec_coarse <- scale(as.matrix(data_en_dec_coarse)) # --> explanatory variables -> x
+```
+
+remove the variables EC and O2, due to missing values (NA).
+See in previous version, results where these variables were included (before change of package), results are similar
+```{r}
+data_en_dec_coarse <- data_en_dec_coarse[, -c(6,7)]
+```
+
+conduct a stability selection --> calculate probability that a variable is selected
+we use 0.7 (70%) as cutoff point
+```{r}
+set.seed(123) # set seed to enable better reproducibility (still not 100% reproducibility)
+(stab.lasso_dec_coarse <- stabsel(x = data_en_dec_coarse, y = res_dec_coarse,
+                             fitfun = glmnet.lasso, cutoff = 0.7,
+                             PFER = 1))
+```
+variables selected: sumTU_iv_date_t1, TP_t1_tr 
+
+
+## create Figure S3
+create dataframe with all explanatory variables (also not transformed to facilitate the plots)
+```{r}
+Decom_all <- merge(Decom_2019_all, exp_var, by=c("siteID"))
+```
+
+create linear models with all explanatory variables 
+
+Plot S3A: leaves vs. flow velocity
+
+```{r}
+Decom_all_leaves <- Decom_all[!is.na(Decom_all$DSM_leaves), ]
+m1 <- lm(DSM_leaves ~ streamType + log10(area) + ratio_agri + fine_sub + O2_t1 + pH_t1 + EC_t1 + flow_t1 + sumTU_fu_date_t1 + log10(PO4_t1) + NO2_t1 + log10(NH4_t1) + log10(TP_t1) + log10(TNb_t1)  + log10(As_t1) + Cu_t1 + log10(Hg_t1) + log10(Zn_t1) , data = Decom_all_leaves)
+g1_flow <- ggpredict(m1, terms = "flow_t1")
+p1 <- plot(g1_flow)+
+  ggtitle("") +
+  ylab("Decomposed leaf mass [%] per dday")+
+  xlab("Flow velocity [m/sec]") +
+  labs(subtitle = "A") +
+  geom_line(size=1.5)+
+  theme_classic()+
+  theme(axis.text.x = element_text(colour="black", size = 12), 
+        axis.text.y = element_text(colour="black", size = 12), 
+        plot.subtitle = element_text(colour="black", size = 14),
+        legend.position="none", strip.text.x = element_text(face = "bold"), 
+        text = element_text(size=11), plot.title = element_text(hjust = 0.5))
+```
+
+
+Plot S3 B: leaves vs. arsenic
+
+```{r}
+g1_As <- ggpredict(m1, terms = "As_t1")
+p2 <- plot(g1_As)+
+  ggtitle("") +
+  ylab("Decomposed leaf mass [%] per dday")+
+  xlab("Arsenic [mg/L]") +
+  scale_x_log10() + 
+  labs(subtitle = "B") +
+  geom_line(size=1.5)+
+  theme_classic()+
+  theme(axis.text.x = element_text(colour="black", size = 12), 
+        axis.text.y = element_text(colour="black", size = 12), 
+        plot.subtitle = element_text(colour="black", size = 14),
+        legend.position="none", strip.text.x = element_text(face = "bold"), 
+        text = element_text(size=11), plot.title = element_text(hjust = 0.5))
+```
+
+
+Plot S3 C: leaves vs. ratio agriculture
+
+```{r}
+g1_agri <- ggpredict(m1, terms = "ratio_agri")
+p3 <- plot(g1_agri)+
+  ggtitle("") +
+  ylab("Decomposed leaf mass [%] per dday")+
+  xlab("Agriculture catchment [%]") +
+  labs(subtitle = "C") +
+  geom_line(size=1.5)+
+  theme_classic()+
+  theme(axis.text.x = element_text(colour="black", size = 12), 
+        axis.text.y = element_text(colour="black", size = 12), 
+        plot.subtitle = element_text(colour="black", size = 14),
+        legend.position="none", strip.text.x = element_text(face = "bold"), 
+        text = element_text(size=11), plot.title = element_text(hjust = 0.5))
+```
+
+
+Plot S3 D: cotton strips vs. ratio agriculture
+
+```{r}
+Decom_all_cotton <- Decom_all[!is.na(Decom_all$Tens_loss), ]
+m2 <- lm(Tens_loss ~ streamType + log10(area) + ratio_agri + fine_sub + O2_t1 + pH_t1 + EC_t1 + flow_t1 + sumTU_fu_date_t1 + log10(PO4_t1) + NO2_t1 + log10(NH4_t1) + log10(TP_t1) + log10(TNb_t1)  + log10(As_t1) + Cu_t1 + log10(Hg_t1) + log10(Zn_t1) , data = Decom_all_cotton)
+g2_agri <- ggpredict(m2, terms = "ratio_agri")
+p4 <- plot(g2_agri)+
+  ggtitle("") +
+  ylab("Tension loss [%] per dday")+
+  xlab("Agriculture catchment [%]") +
+  labs(subtitle = "D") +
+  geom_line(size=1.5)+
+  theme_classic()+
+  theme(axis.text.x = element_text(colour="black", size = 12), 
+        axis.text.y = element_text(colour="black", size = 12), 
+        plot.subtitle = element_text(colour="black", size = 14),
+        legend.position="none", strip.text.x = element_text(face = "bold"), 
+        text = element_text(size=11), plot.title = element_text(hjust = 0.5))
+```
+
+
+Plot S3 E: decotabs vs. sumTUfungi 
+
+```{r}
+Decom_all_deco <- Decom_all[!is.na(Decom_all$DSM_Decotabs), ]
+m3 <- lm(DSM_Decotabs ~ streamType + log10(area) + ratio_agri + fine_sub + O2_t1 + pH_t1 + EC_t1 + flow_t1 + sumTU_fu_date_t1 + log10(PO4_t1) + NO2_t1 + log10(NH4_t1) + log10(TP_t1) + log10(TNb_t1)  + log10(As_t1) + Cu_t1 + log10(Hg_t1) + log10(Zn_t1), data = Decom_all_deco)
+g3_sumfu <- ggpredict(m3, terms = "sumTU_fu_date_t1")
+p5 <- plot(g3_sumfu)+
+  ggtitle("") +
+  ylab("Decomposed decotabs mass [%] per dday")+
+  xlab("sumTU for fungi") +
+  labs(subtitle = "E") +
+  geom_line(size=1.5)+
+  theme_classic()+
+  theme(axis.text.x = element_text(colour="black", size = 12), 
+        axis.text.y = element_text(colour="black", size = 12), 
+        plot.subtitle = element_text(colour="black", size = 14),
+        legend.position="none", strip.text.x = element_text(face = "bold"), 
+        text = element_text(size=11), plot.title = element_text(hjust = 0.5))
+```
+
+
+Plot S3 F: leaves total decomposition vs speartaxa
+```{r}
+Decom_all_leaves_coarse <- Decom_all[!is.na(Decom_all$DSM_leaves_coarse), ]
+
+m4 <- lm(DSM_leaves_coarse ~ streamType + log10(area) + ratio_agri + fine_sub + O2_t2 + pH_t2 + EC_t2 + flow_t2 + sumTU_fu_date_t2 + log10(PO4_t2) + log10(NO2_t2) + log10(NH4_t2) + log10(TP_t2) + log10(TNb_t2)  + As_t2 + Cu_t2 + log10(Hg_t2) + log10(Zn_t2) + sumTU_iv_date_t2 + CPOM + speartaxa + perc_shred, data = Decom_all_leaves_coarse)
+
+g4_spear <- ggpredict(m4, terms = "speartaxa")
+p6 <- plot(g4_spear)+
+  ggtitle("") +
+  ylab(expression(atop("Total decomposed leaf mass [%]", paste("per dday"))))+
+  xlab(expression("SPEAR" [pesticides])) +
+  labs(subtitle = "F") +
+  geom_line(size=1.5)+
+  theme_classic()+
+  theme(axis.text.x = element_text(colour="black", size = 12), 
+        axis.text.y = element_text(colour="black", size = 12), 
+        plot.subtitle = element_text(colour="black", size = 14),
+        legend.position="none", strip.text.x = element_text(face = "bold"), 
+        text = element_text(size=11), plot.title = element_text(hjust = 0.5))
+```
+
+
+Plot S3 G: decotabs total decomposition vs. TP
+
+```{r}
+Decom_all_deco_coarse <- Decom_all[!is.na(Decom_all$DSM_Decotabs_coarse), ]
+
+m5 <- lm(DSM_Decotabs_coarse ~ streamType + log10(area) + ratio_agri + fine_sub + O2_t1 + pH_t1 + EC_t1 + flow_t1 + sumTU_fu_date_t1 + log10(PO4_t1) + NO2_t1 + log10(NH4_t1) + log10(TP_t1) + log10(TNb_t1)  + log10(As_t1) + Cu_t1 + log10(Hg_t1) + log10(Zn_t1) + CPOM + sumTU_iv_date_t1 + speartaxa + perc_shred, data = Decom_all_deco_coarse)
+
+g5_TP <- ggpredict(m5, terms = "TP_t1")
+p7 <- plot(g5_TP)+
+  ggtitle("") +
+  ylab(expression(atop("Total decomposed decotabs mass [%]", paste("per dday"))))+
+  xlab("Total phosphorus [mg/L]") +
+  scale_x_log10() + 
+  labs(subtitle = "G") +
+  geom_line(size=1.5)+
+  theme_classic()+
+  theme(axis.text.x = element_text(colour="black", size = 12), 
+        axis.text.y = element_text(colour="black", size = 12), 
+        plot.subtitle = element_text(colour="black", size = 14),
+        legend.position="none", strip.text.x = element_text(face = "bold"), 
+        text = element_text(size=11), plot.title = element_text(hjust = 0.5))
+
+```
+
+Fig S3 H: total decotabs vs. sumTUinvertebrates
+```{r}
+g5_sumTUiv <- ggpredict(m5, terms = "sumTU_iv_date_t1")
+p8 <- plot(g5_sumTUiv)+
+  ggtitle("") +
+  ylab(expression(atop("Total decomposed decotabs mass [%]", paste("per dday"))))+
+  xlab("sumTU for invertebrates") +
+  labs(subtitle = "H") +
+  geom_line(size=1.5)+
+  theme_classic()+
+  theme(axis.text.x = element_text(colour="black", size = 12), 
+        axis.text.y = element_text(colour="black", size = 12), 
+        plot.subtitle = element_text(colour="black", size = 14),
+        legend.position="none", strip.text.x = element_text(face = "bold"), 
+        text = element_text(size=11), plot.title = element_text(hjust = 0.5))
+```
+
+
+save plot
+```{r, warning = FALSE}
+png(filename="Figure_S3_effects_plots.png", width=9, height=12.5, units="in", res = 1000)
+# arrange via cowplot
+ggdraw() +
+  draw_plot(p1, x = 0, y = 0.75, width = 0.5, height = 0.25) +
+  draw_plot(p2, x = 0.5, y = 0.75, width = 0.5, height = 0.25) +
+  draw_plot(p3, x = 0, y = 0.5, width = 0.5, height = 0.25) + 
+  draw_plot(p4, x = 0.5, y = 0.5, width = 0.5, height = 0.25)+
+  draw_plot(p5, x = 0, y = 0.25, width = 0.5, height = 0.25) +
+  draw_plot(p6, x = 0.5, y = 0.25, width = 0.5, height = 0.25) +
+  draw_plot(p7, x = 0, y = 0, width = 0.5, height = 0.25) + 
+  draw_plot(p8, x = 0.5, y = 0, width = 0.5, height = 0.25)
+dev.off()
+```
+
+
+#### checking all relationships
+microbial leaves
+```{r}
+(g1_type <- ggpredict(m1, terms = "streamType")) # neg relationship
+(g1_area <- ggpredict(m1, terms = "area")) # no tendency
+(g1_agri <- ggpredict(m1, terms = "ratio_agri")) # neg relationship
+(g1_fine <- ggpredict(m1, terms = "fine_sub ")) # slight neg relationship
+(g1_O2 <- ggpredict(m1, terms = "O2_t1  "))  # pos relationship
+(g1_EC <- ggpredict(m1, terms = "EC_t1  "))  # slight pos relationship
+(g1_pH <- ggpredict(m1, terms = "pH_t1  ")) # no tendency
+(g1_flow <- ggpredict(m1, terms = "flow_t1")) # pos relationship
+(g1_sumfu <- ggpredict(m1, terms = "sumTU_fu_date_t1  ")) # pos relationship
+(g1_PO4 <- ggpredict(m1, terms = "PO4_t1  ")) # pos relationship
+(g1_NO2 <- ggpredict(m1, terms = "NO2_t1  ")) # slight neg relationship
+(g1_NH4 <- ggpredict(m1, terms = "NH4_t1  ")) # no tendency
+(g1_TP <- ggpredict(m1, terms = "TP_t1  ")) # no tendency
+(g1_TN <- ggpredict(m1, terms = "TNb_t1  ")) # slight neg tendency
+(g1_As <- ggpredict(m1, terms = "As_t1  ")) # neg relationship
+(g1_Cu <- ggpredict(m1, terms = "Cu_t1  ")) # neg relationship
+(g1_Hg <- ggpredict(m1, terms = "Hg_t1  ")) # slight pos relationship
+(g1_Zn <- ggpredict(m1, terms = "Zn_t1  ")) # pos relationship
+```
+
+cotton strips
+```{r}
+(g2_type <- ggpredict(m2, terms = "streamType")) # pos relationship
+(g2_area <- ggpredict(m2, terms = "area")) # pos relationship
+(g2_agri <- ggpredict(m2, terms = "ratio_agri")) # pos relationship
+(g2_fine <- ggpredict(m2, terms = "fine_sub ")) # slight neg relationship
+(g2_O2 <- ggpredict(m2, terms = "O2_t1  "))  # pos relationship
+(g2_EC <- ggpredict(m2, terms = "EC_t1  "))  # neg relationship
+(g2_pH <- ggpredict(m2, terms = "pH_t1  ")) # neg relationship
+(g2_flow <- ggpredict(m2, terms = "flow_t1")) # neg relationship
+(g2_sumfu <- ggpredict(m2, terms = "sumTU_fu_date_t1  ")) # pos relationship
+(g2_PO4 <- ggpredict(m2, terms = "PO4_t1  ")) # neg relationship
+(g2_NO2 <- ggpredict(m2, terms = "NO2_t1  ")) # neg relationship
+(g2_NH4 <- ggpredict(m2, terms = "NH4_t1  ")) # no tendency
+(g2_TP <- ggpredict(m2, terms = "TP_t1  ")) # pos relationship
+(g2_TN <- ggpredict(m2, terms = "TNb_t1  ")) # pos relationship
+(g2_As <- ggpredict(m2, terms = "As_t1  ")) # pos relationship
+(g2_Cu <- ggpredict(m2, terms = "Cu_t1  ")) # neg relationship
+(g2_Hg <- ggpredict(m2, terms = "Hg_t1  ")) # slight neg relationship
+(g2_Zn <- ggpredict(m2, terms = "Zn_t1  ")) # neg relationship
+```
+
+
+total decotabs
+```{r}
+(g3_type <- ggpredict(m3, terms = "streamType")) # pos relationship
+(g3_area <- ggpredict(m3, terms = "area")) # no tendency
+(g3_agri <- ggpredict(m3, terms = "ratio_agri")) # slight pos relationship
+(g3_fine <- ggpredict(m3, terms = "fine_sub ")) # pos relationship
+(g3_O2 <- ggpredict(m3, terms = "O2_t1  "))  # pos relationship
+(g3_EC <- ggpredict(m3, terms = "EC_t1  "))  # neg relationship
+(g3_pH <- ggpredict(m3, terms = "pH_t1  ")) # neg relationship
+(g3_flow <- ggpredict(m3, terms = "flow_t1")) # neg relationship
+(g3_sumfu <- ggpredict(m3, terms = "sumTU_fu_date_t1  ")) # pos relationship
+(g3_PO4 <- ggpredict(m3, terms = "PO4_t1  ")) # neg relationship
+(g3_NO2 <- ggpredict(m3, terms = "NO2_t1  ")) # no tendency
+(g3_NH4 <- ggpredict(m3, terms = "NH4_t1  ")) # neg relationship
+(g3_TP <- ggpredict(m3, terms = "TP_t1  ")) # pos relationship
+(g3_TN <- ggpredict(m3, terms = "TNb_t1  ")) # pos relationship
+(g3_As <- ggpredict(m3, terms = "As_t1  ")) # pos relationship
+(g3_Cu <- ggpredict(m3, terms = "Cu_t1  ")) # no tendency
+(g3_Hg <- ggpredict(m3, terms = "Hg_t1  ")) # no tendency
+(g3_Zn <- ggpredict(m3, terms = "Zn_t1  ")) # neg relationship
+```
+
+
+total leaves
+```{r}
+(g4_type <- ggpredict(m4, terms = "streamType")) # neg relationship
+(g4_area <- ggpredict(m4, terms = "area")) # neg relationship
+(g4_agri <- ggpredict(m4, terms = "ratio_agri")) # neg relationship
+(g4_fine <- ggpredict(m4, terms = "fine_sub ")) # pos relationship
+(g4_O2 <- ggpredict(m4, terms = "O2_t2  "))  # pos relationship
+(g4_EC <- ggpredict(m4, terms = "EC_t2  "))  # neg relationship
+(g4_pH <- ggpredict(m4, terms = "pH_t2  ")) # neg relationship
+(g4_flow <- ggpredict(m4, terms = "flow_t2")) # neg relationship
+(g4_sumfu <- ggpredict(m4, terms = "sumTU_fu_date_t2  ")) # pos relationship
+(g4_PO4 <- ggpredict(m4, terms = "PO4_t2  ")) # no tendency
+(g4_NO2 <- ggpredict(m4, terms = "NO2_t2  ")) # pos relationship
+(g4_NH4 <- ggpredict(m4, terms = "NH4_t2  ")) # neg relationship
+(g4_TP <- ggpredict(m4, terms = "TP_t2  ")) # pos relationship
+(g4_TN <- ggpredict(m4, terms = "TNb_t2  ")) # pos relationship
+(g4_As <- ggpredict(m4, terms = "As_t2  ")) # neg relationship
+(g4_Cu <- ggpredict(m4, terms = "Cu_t2  ")) # pos relationship
+(g4_Hg <- ggpredict(m4, terms = "Hg_t2  ")) # neg relationship
+(g4_Zn <- ggpredict(m4, terms = "Zn_t2  ")) # neg relationship
+(g4_CPOM <- ggpredict(m4, terms = "CPOM  ")) # pos relationship
+(g4_sumiv <- ggpredict(m4, terms = "sumTU_iv_date_t2  ")) # no tendency
+(g4_shred <- ggpredict(m4, terms = "perc_shred  ")) # pos relationship
+(g4_spear <- ggpredict(m4, terms = "speartaxa  ")) # pos relationship
+```
+
+
+total decotabs
+```{r}
+(g5_type <- ggpredict(m5, terms = "streamType")) # no tendency
+(g5_area <- ggpredict(m5, terms = "area")) # pos relationship
+(g5_agri <- ggpredict(m5, terms = "ratio_agri")) # pos relationship
+(g5_fine <- ggpredict(m5, terms = "fine_sub ")) # neg relationship
+(g5_O2 <- ggpredict(m5, terms = "O2_t1  "))  # pos relationship
+(g5_EC <- ggpredict(m5, terms = "EC_t1  "))  # neg relationship
+(g5_pH <- ggpredict(m5, terms = "pH_t1  ")) # neg relationship
+(g5_flow <- ggpredict(m5, terms = "flow_t1")) # pos relationship
+(g5_sumfu <- ggpredict(m5, terms = "sumTU_fu_date_t1  ")) # no tendency
+(g5_PO4 <- ggpredict(m5, terms = "PO4_t1  ")) # neg relationship
+(g5_NO2 <- ggpredict(m5, terms = "NO2_t1  ")) # neg tendency
+(g5_NH4 <- ggpredict(m5, terms = "NH4_t1  ")) # pos relationship
+(g5_TP <- ggpredict(m5, terms = "TP_t1  ")) # pos relationship
+(g5_TN <- ggpredict(m5, terms = "TNb_t1  ")) # neg relationship
+(g5_As <- ggpredict(m5, terms = "As_t1  ")) # neg relationship
+(g5_Cu <- ggpredict(m5, terms = "Cu_t1  ")) # neg relationship
+(g5_Hg <- ggpredict(m5, terms = "Hg_t1  ")) # no tendency
+(g5_Zn <- ggpredict(m5, terms = "Zn_t1  ")) # neg relationship
+(g5_CPOM <- ggpredict(m5, terms = "CPOM  ")) # no tendency
+(g5_sumiv <- ggpredict(m5, terms = "sumTU_iv_date_t1  ")) # pos relatioship
+(g5_shred <- ggpredict(m5, terms = "perc_shred  ")) # pos relationship
+(g5_spear <- ggpredict(m5, terms = "speartaxa  ")) # no tendency
+```

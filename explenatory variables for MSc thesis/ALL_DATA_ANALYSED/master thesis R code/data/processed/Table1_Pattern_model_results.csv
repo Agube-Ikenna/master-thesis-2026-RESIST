@@ -1,0 +1,7 @@
+"Catchment","Endpoint","Contrast","Estimate","SE","t","Sig"
+"Kinzig","k_micro","Urban vs rural",-0.000179,0.000203,-0.88,"ns"
+"Kinzig","k_total","Urban vs rural",-0.003833,0.002021,-1.897,"ns"
+"Boye","k_micro","Recently restored vs reference",0.000649,0.001472,0.441,"ns"
+"Boye","k_micro","Long restored vs reference",-0.000083,0.001472,-0.057,"ns"
+"Boye","k_total","Recently restored vs reference",-0.012363,0.006795,-1.82,"ns"
+"Boye","k_total","Long restored vs reference",-0.014851,0.006795,-2.186,"ns"

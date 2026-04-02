@@ -1,0 +1,28 @@
+{
+    "id": "EE84DED6",
+    "path": null,
+    "project_path": null,
+    "type": "object_explorer",
+    "hash": "0",
+    "contents": "",
+    "dirty": false,
+    "created": 1746629718719.0,
+    "source_on_save": false,
+    "relative_order": 7,
+    "properties": {
+        "id": "dd69342dec0243da9010388f5046f5ab",
+        "name": "model_t1",
+        "title": "model_t1",
+        "language": "R",
+        "source_window_id": "",
+        "Source": "Source"
+    },
+    "folds": "",
+    "lastKnownWriteTime": 3100714926016,
+    "encoding": "",
+    "collab_server": "",
+    "source_window": "",
+    "last_content_update": 1746629718719,
+    "read_only": false,
+    "read_only_alternatives": []
+}

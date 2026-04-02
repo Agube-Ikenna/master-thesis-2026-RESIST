@@ -1,0 +1,5 @@
+"dataset","skewness","log_transform_applied"
+"kinzig_micro k",1.07936533382109,FALSE
+"kinzig_total k",1.27208884135186,FALSE
+"boye_micro k",0.397592521114657,FALSE
+"boye_total k",0.803793718131451,FALSE

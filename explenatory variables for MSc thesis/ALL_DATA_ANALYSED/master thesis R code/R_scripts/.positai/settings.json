@@ -1,0 +1,27 @@
+{
+  "permission": {
+    "edit": {
+      "*.Rmd": "allow",
+      "*.R": "allow"
+    },
+    "executeCode": {
+      "*": "allow"
+    },
+    "external_directory": {
+      "/Users/ikenna/Library/Mobile Documents/com~apple~CloudDocs/masters/Intership Files/*": "allow",
+      "/var/folders/t_/5j5fg7gj77qfjggqhxdr9m1r0000gn/T/positai/tools/executeCode/*": "allow"
+    },
+    "bash": {
+      "find *": "allow",
+      "ls *": "allow"
+    },
+    "read": {
+      "*.log": "allow",
+      "*": "allow"
+    }
+  },
+  "model": {
+    "id": "claude-sonnet-4-6",
+    "provider": "positai"
+  }
+}

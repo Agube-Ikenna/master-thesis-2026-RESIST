@@ -1,0 +1,10 @@
+"response","term","estimate","std.error","df","statistic","p.value"
+"k_micro","(Intercept)",-2.473,0.086,53.9999999998674,-28.893,0
+"k_micro","LandUseurban",0.045,0.123,53.9999999998737,0.368,0.714
+"k_total","(Intercept)",-0.811,0.337,17.0452310198419,-2.411,0.027
+"k_total","LandUseurban",-0.751,0.487,16.8056260511371,-1.542,0.142
+"k_macro","(Intercept)",1.656,0.342,17.1978959446187,4.85,0
+"k_macro","LandUseurban",-0.791,0.494,16.953579769528,-1.601,0.128
+"k_macro (+abundance)","(Intercept)",1.412,0.387,20.3813469561748,3.647,0.002
+"k_macro (+abundance)","LandUseurban",-0.898,0.502,16.8221593232629,-1.788,0.092
+"k_macro (+abundance)","total_abundance",0.011,0.008,41.0694852735194,1.358,0.182

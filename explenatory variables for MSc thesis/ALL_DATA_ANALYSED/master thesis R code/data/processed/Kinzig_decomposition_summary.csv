@@ -1,0 +1,7 @@
+"LandUse","Catchment","Endpoint","n","mean_k","se_k"
+"rural","Kinzig","Microbial",27,0.000971851851851852,0.000113305724436319
+"urban","Kinzig","Microbial",27,0.000795185185185185,0.0000836172434989454
+"rural","Kinzig","Total",24,0.0093125,0.00118976816186411
+"urban","Kinzig","Total",26,0.00598346153846154,0.000606556977425786
+"rural","Kinzig","Macroinvertebrate",23,0.00854130434782609,0.00124159089332297
+"urban","Kinzig","Macroinvertebrate",26,0.00518884615384615,0.00057516722034635

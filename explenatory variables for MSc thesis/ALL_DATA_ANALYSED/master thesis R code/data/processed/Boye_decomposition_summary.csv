@@ -1,0 +1,10 @@
+"RestStatus","Catchment","Endpoint","n","mean_k","se_k"
+"reference","Boye","Microbial",3,0.00333666666666667,0.000104774890970011
+"recently_restored","Boye","Microbial",9,0.00398555555555556,0.000525803911250591
+"long_restored","Boye","Microbial",9,0.00325333333333333,0.000200166597280032
+"reference","Boye","Total",3,0.0302733333333333,0.00245275581970793
+"recently_restored","Boye","Total",9,0.01791,0.00307644229951128
+"long_restored","Boye","Total",9,0.0154222222222222,0.00220257032790845
+"reference","Boye","Macroinvertebrate",3,0.0269366666666667,0.00241216592390417
+"recently_restored","Boye","Macroinvertebrate",9,0.0139244444444444,0.00296571900178201
+"long_restored","Boye","Macroinvertebrate",9,0.0121688888888889,0.00219849661034058
